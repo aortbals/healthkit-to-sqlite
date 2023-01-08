@@ -1,3 +1,4 @@
+use crate::core::case_insensitive_string::{deduplicate_case_insensitive, CaseInsensitiveString};
 use log::*;
 use quick_xml::events::{BytesStart, Event};
 use sqlx::migrate::MigrateDatabase;
@@ -9,6 +10,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek};
 use std::path::PathBuf;
 use time::{format_description, Date, OffsetDateTime};
+
+mod case_insensitive_string;
 
 lazy_static::lazy_static! {
     static ref HEALTHKIT_OFFSET_DATE_FORMAT_STR: &'static str =
@@ -116,16 +119,33 @@ async fn sqlite_create_healthkit_tables<R: BufRead>(
         buf.clear();
     }
     for (name, columns) in tables {
+        let deduplicated: Vec<CaseInsensitiveString> = deduplicate_case_insensitive(
+            columns
+                .iter()
+                .map(|(name, ty)| {
+                    CaseInsensitiveString::new(&format!(
+                        "{} {}",
+                        get_valid_sqlite_identifier(name),
+                        ty
+                    ))
+                })
+                .collect(),
+        );
+
+        println!("{:#?}", deduplicated);
+
+        let joined: String = deduplicated
+            .into_iter()
+            .map(|s| s.inner)
+            .collect::<Vec<_>>()
+            .join(", ");
+
         let qs = format!(
             r#"CREATE TABLE IF NOT EXISTS `{}` ({});
         "#,
-            name,
-            columns
-                .iter()
-                .map(|(name, ty)| format!("{} {}", get_valid_sqlite_identifier(name), ty))
-                .collect::<Vec<_>>()
-                .join(", ")
+            name, joined
         );
+        println!("{}", qs);
         sqlx::query(&qs).execute(&mut *tx).await?;
     }
     Ok(())
